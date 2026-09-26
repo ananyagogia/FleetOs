@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>FleetOS Scheduling</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #f4f6f8;
+            color: #222;
+        }
+
+        .container {
+            width: 90%;
+            max-width: 1100px;
+            margin: 30px auto;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 5px;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 25px;
+        }
+
+        .card {
+            background: white;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+
+        .buttons {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            background: #2563eb;
+            color: white;
+            font-size: 15px;
+        }
+
+        button:hover {
+            background: #1d4ed8;
+        }
+
+        .input-row {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        input {
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            width: 150px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+
+        th,
+        td {
+            padding: 12px;
+            border: 1px solid #ddd;
+            text-align: center;
+        }
+
+        th {
+            background: #eef2ff;
+        }
+
+        .stats {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        .stat-box {
+            flex: 1;
+            min-width: 200px;
+            padding: 18px;
+            background: #f8fafc;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .stat-box h3 {
+            margin: 5px 0;
+        }
+
+        .gantt {
+            display: flex;
+            align-items: stretch;
+            margin-top: 20px;
+            overflow-x: auto;
+        }
+
+        .gantt-box {
+            min-width: 100px;
+            padding: 15px;
+            border: 1px solid #333;
+            text-align: center;
+            background: #e0e7ff;
+        }
+
+        .time-row {
+            display: flex;
+            margin-top: 5px;
+        }
+
+        .time {
+            min-width: 100px;
+            text-align: left;
+        }
+
+        .empty {
+            text-align: center;
+            color: #777;
+            padding: 20px;
+        }
+
+        @media(max-width: 700px) {
+            .container {
+                width: 95%;
+            }
+
+            table {
+                font-size: 12px;
+            }
+
+            input {
+                width: 100%;
+            }
+
+            .buttons {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+<div class="container">
+
+    <h1>FleetOS Scheduling</h1>
+
+    <p class="subtitle">
+        FCFS and SJF CPU Scheduling Simulation
+    </p>
+
+
+    <!-- Algorithm Selection -->
+    <div class="card">
+
+        <h2>Select Scheduling Algorithm</h2>
+
+        <div class="buttons">
+
+            <button onclick="runAlgorithm('FCFS')">
+                FCFS
+            </button>
+
+            <button onclick="runAlgorithm('SJF')">
+                SJF
+            </button>
+
+        </div>
+
+        <p>
+            Current Algorithm:
+            <strong id="currentAlgorithm">FCFS</strong>
+        </p>
+
+    </div>
+
+
+    <!-- Add Mission -->
+    <div class="card">
+
+        <h2>Add Process / Mission</h2>
+
+        <div class="input-row">
+
+            <input
+                type="text"
+                id="missionId"
+                placeholder="Process ID"
+            >
+
+            <input
+                type="number"
+                id="arrivalTime"
+                placeholder="Arrival Time"
+                min="0"
+            >
+
+            <input
+                type="number"
+                id="burstTime"
+                placeholder="Burst Time"
+                min="1"
+            >
+
+            <button onclick="addMission()">
+                Add Process
+            </button>
+
+        </div>
+
+    </div>
+
+
+    <!-- Input Processes -->
+    <div class="card">
+
+        <h2>Process List</h2>
+
+        <table>
+
+            <thead>
+
+                <tr>
+                    <th>Process ID</th>
+                    <th>Arrival Time</th>
+                    <th>Burst Time</th>
+                </tr>
+
+            </thead>
+
+            <tbody id="processTable">
+            </tbody>
+
+        </table>
+
+    </div>
+
+
+    <!-- Results -->
+    <div class="card">
+
+        <h2>Scheduling Result</h2>
+
+        <table>
+
+            <thead>
+
+                <tr>
+                    <th>Process ID</th>
+                    <th>Start Time</th>
+                    <th>Completion Time</th>
+                    <th>Waiting Time</th>
+                    <th>Turnaround Time</th>
+                </tr>
+
+            </thead>
+
+            <tbody id="resultTable">
+            </tbody>
+
+        </table>
+
+    </div>
+
+
+    <!-- Statistics -->
+    <div class="card">
+
+        <h2>Performance</h2>
+
+        <div class="stats">
+
+            <div class="stat-box">
+
+                <p>Average Waiting Time</p>
+
+                <h3 id="avgWaiting">
+                    0
+                </h3>
+
+            </div>
+
+
+            <div class="stat-box">
+
+                <p>Average Turnaround Time</p>
+
+                <h3 id="avgTurnaround">
+                    0
+                </h3>
+
+            </div>
+
+        </div>
+
+    </div>
+
+
+    <!-- Gantt Chart -->
+    <div class="card">
+
+        <h2>Gantt Chart</h2>
+
+        <div id="ganttChart" class="gantt">
+        </div>
+
+    </div>
+
+</div>
+
+
+<script>
+
+    // ---------------------------------------
+    // Initial Processes
+    // ---------------------------------------
+
+    let missions = [
+
+        {
+            id: "M1",
+            arrival_time: 0,
+            burst_time: 5
+        },
+
+        {
+            id: "M2",
+            arrival_time: 1,
+            burst_time: 3
+        },
+
+        {
+            id: "M3",
+            arrival_time: 2,
+            burst_time: 2
+        },
+
+        {
+            id: "M4",
+            arrival_time: 3,
+            burst_time: 4
+        }
+
+    ];
+
+
+    let currentAlgorithm = "FCFS";
+
+
+    // ---------------------------------------
+    // FCFS Algorithm
+    // ---------------------------------------
+
+    function fcfs(missions) {
+
+        let currentTime = 0;
+
+        let results = [];
+
+
+        for (let mission of missions) {
+
+            // If CPU is idle
+            if (currentTime < mission.arrival_time) {
+
+                currentTime = mission.arrival_time;
+
+            }
+
+
+            let startTime = currentTime;
+
+            let completionTime =
+                startTime + mission.burst_time;
+
+
+            let waitingTime =
+                startTime - mission.arrival_time;
+
+
+            let turnaroundTime =
+                completionTime - mission.arrival_time;
+
+
+            results.push({
+
+                id: mission.id,
+
+                start_time: startTime,
+
+                completion_time: completionTime,
+
+                waiting_time: waitingTime,
+
+                turnaround_time: turnaroundTime
+
+            });
+
+
+            currentTime = completionTime;
+
+        }
+
+
+        return results;
+
+    }
+
+
+    // ---------------------------------------
+    // SJF Algorithm
+    // ---------------------------------------
+
+    function sjf(missions) {
+
+        let currentTime = 0;
+
+        let remainingMissions = [...missions];
+
+        let results = [];
+
+
+        while (remainingMissions.length > 0) {
+
+            // Find available processes
+
+            let availableMissions =
+                remainingMissions.filter(
+                    mission =>
+                        mission.arrival_time <= currentTime
+                );
+
+
+            // If no process is available
+
+            if (availableMissions.length === 0) {
+
+                currentTime =
+                    Math.min(
+                        ...remainingMissions.map(
+                            mission => mission.arrival_time
+                        )
+                    );
+
+                continue;
+
+            }
+
+
+            // Select process having minimum burst time
+
+            let selectedMission =
+                availableMissions.reduce(
+                    (shortest, mission) => {
+
+                        if (
+                            mission.burst_time <
+                            shortest.burst_time
+                        ) {
+
+                            return mission;
+
+                        }
+
+                        return shortest;
+
+                    }
+                );
+
+
+            let startTime = currentTime;
+
+
+            let completionTime =
+                startTime +
+                selectedMission.burst_time;
+
+
+            let waitingTime =
+                startTime -
+                selectedMission.arrival_time;
+
+
+            let turnaroundTime =
+                completionTime -
+                selectedMission.arrival_time;
+
+
+            results.push({
+
+                id: selectedMission.id,
+
+                start_time: startTime,
+
+                completion_time: completionTime,
+
+                waiting_time: waitingTime,
+
+                turnaround_time: turnaroundTime
+
+            });
+
+
+            currentTime = completionTime;
+
+
+            // Remove selected process
+
+            remainingMissions =
+                remainingMissions.filter(
+                    mission =>
+                        mission !== selectedMission
+                );
+
+        }
+
+
+        return results;
+
+    }
+
+
+
+    
+
+    function runAlgorithm(algorithm) {
+
+        currentAlgorithm = algorithm;
+
+        document.getElementById(
+            "currentAlgorithm"
+        ).textContent = algorithm;
+
+
+        let results;
+
+
+        if (algorithm === "FCFS") {
+
+            results = fcfs(missions);
+
+        }
+
+        else if (algorithm === "SJF") {
+
+            results = sjf(missions);
+
+        }
+
+
+        displayResults(results);
+
+    }
+
+
+    // ---------------------------------------
+    // Display Input Processes
+    // ---------------------------------------
+
+    function displayProcesses() {
+
+        let table =
+            document.getElementById("processTable");
+
+
+        table.innerHTML = "";
+
+
+        missions.forEach(mission => {
+
+            let row =
+                document.createElement("tr");
+
+
+            row.innerHTML = `
+
+                <td>${mission.id}</td>
+
+                <td>${mission.arrival_time}</td>
+
+                <td>${mission.burst_time}</td>
+
+            `;
+
+
+            table.appendChild(row);
+
+        });
+
+    }
+
+    function displayResults(results) {
+
+        let table =
+            document.getElementById("resultTable");
+
+
+        table.innerHTML = "";
+
+
+        let totalWaiting = 0;
+
+        let totalTurnaround = 0;
+
+
+        results.forEach(result => {
+
+            totalWaiting +=
+                result.waiting_time;
+
+
+            totalTurnaround +=
+                result.turnaround_time;
+
+
+            let row =
+                document.createElement("tr");
+
+
+            row.innerHTML = `
+
+                <td>${result.id}</td>
+
+                <td>${result.start_time}</td>
+
+                <td>${result.completion_time}</td>
+
+                <td>${result.waiting_time}</td>
+
+                <td>${result.turnaround_time}</td>
+
+            `;
+
+
+            table.appendChild(row);
+
+        });
+
+
+        
+
+        let avgWaiting =
+            totalWaiting / results.length;
+
+
+        
+
+        let avgTurnaround =
+            totalTurnaround / results.length;
+
+
+        document.getElementById(
+            "avgWaiting"
+        ).textContent =
+            avgWaiting.toFixed(2);
+
+
+        document.getElementById(
+            "avgTurnaround"
+        ).textContent =
+            avgTurnaround.toFixed(2);
+
+
+        displayGantt(results);
+
+    }
+
+
+    
+
+    function displayGantt(results) {
+
+        let gantt =
+            document.getElementById("ganttChart");
+
+
+        gantt.innerHTML = "";
+
+
+        results.forEach(result => {
+
+            let box =
+                document.createElement("div");
+
+
+            box.className = "gantt-box";
+
+
+            box.innerHTML = `
+
+                <strong>${result.id}</strong>
+
+                <br>
+
+                ${result.start_time}
+                -
+                ${result.completion_time}
+
+            `;
+
+
+            gantt.appendChild(box);
+
+        });
+
+    }
+
+    function addMission() {
+
+        let id =
+            document.getElementById(
+                "missionId"
+            ).value.trim();
+
+
+        let arrival =
+            Number(
+                document.getElementById(
+                    "arrivalTime"
+                ).value
+            );
+
+
+        let burst =
+            Number(
+                document.getElementById(
+                    "burstTime"
+                ).value
+            );
+
+
+        if (
+            id === "" ||
+            isNaN(arrival) ||
+            isNaN(burst) ||
+            arrival < 0 ||
+            burst <= 0
+        ) {
+
+            alert(
+                "Please enter valid Process ID, Arrival Time and Burst Time."
+            );
+
+            return;
+
+        }
+
+
+        missions.push({
+
+            id: id,
+
+            arrival_time: arrival,
+
+            burst_time: burst
+
+        });
+
+
+        
+
+        document.getElementById(
+            "missionId"
+        ).value = "";
+
+
+        document.getElementById(
+            "arrivalTime"
+        ).value = "";
+
+
+        document.getElementById(
+            "burstTime"
+        ).value = "";
+
+
+        displayProcesses();
+
+
+        runAlgorithm(currentAlgorithm);
+
+    }
+
+
+  
+
+    displayProcesses();
+
+    runAlgorithm("FCFS");
+
+</script>
+
+</body>
+                         </html>
