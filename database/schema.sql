@@ -1,33 +1,36 @@
-CREATE TABLE IF NOT EXISTS drone (
-    drone_id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    call_sign        VARCHAR(30)  NOT NULL UNIQUE,
-    model            VARCHAR(50),
-    max_payload_kg   DECIMAL(5,2),
-    battery_pct      DECIMAL(5,2) NOT NULL DEFAULT 100,   
-    status           VARCHAR(20)  NOT NULL DEFAULT 'AVAILABLE',
-                     -- AVAILABLE | ON_MISSION | CHARGING | MAINTENANCE | OFFLINE
-    home_station_id  INTEGER,
-    last_heartbeat   DATETIME,
-    FOREIGN KEY (home_station_id) REFERENCES charging_station(station_id),
-    CHECK (battery_pct BETWEEN 0 AND 100),
-    CHECK (status IN ('AVAILABLE','ON_MISSION','CHARGING','MAINTENANCE','OFFLINE'))
+CREATE TABLE  UAV (
+    uav_id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            VARCHAR(50)  NOT NULL,
+    model           VARCHAR(50),
+    battery_level   DECIMAL(5,2) NOT NULL DEFAULT 100,   
+    latitude        DECIMAL(9,6),
+    longitude       DECIMAL(9,6),
+    status          VARCHAR(20)  NOT NULL DEFAULT 'IDLE',
+                    -- IDLE | ON_MISSION | CHARGING | MAINTENANCE | OFFLINE
+    availability    BOOLEAN      NOT NULL DEFAULT 1,  
+    CHECK (battery_level BETWEEN 0 AND 100)
 );
 
-CREATE TABLE IF NOT EXISTS mission (
+CREATE TABLE  MISSION (
     mission_id      INTEGER PRIMARY KEY AUTOINCREMENT,
-    emergency_id    INTEGER,                 -- NULL if it's a routine mission
-    mission_type    VARCHAR(30)  NOT NULL,   -- MAPPING | DELIVERY | SURVEILLANCE | RESCUE ...
+    mission_type    VARCHAR(30)  NOT NULL,   
     priority        INTEGER      NOT NULL DEFAULT 3,  
-    payload_kg      DECIMAL(5,2) DEFAULT 0,
-    dest_latitude   DECIMAL(9,6) NOT NULL,
-    dest_longitude  DECIMAL(9,6) NOT NULL,
-    status          VARCHAR(20)  NOT NULL DEFAULT 'QUEUED',
-                    -- QUEUED | ASSIGNED | IN_PROGRESS | COMPLETED | FAILED | CANCELLED
-    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    deadline_at     DATETIME,
-    FOREIGN KEY (emergency_id) REFERENCES emergency_request(emergency_id),
+    latitude        DECIMAL(9,6) NOT NULL,
+    longitude       DECIMAL(9,6) NOT NULL,
+    status          VARCHAR(20)  NOT NULL DEFAULT 'PENDING',
+                    -- PENDING | ASSIGNED | IN_PROGRESS | COMPLETED | FAILED | CANCELLED
+    created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CHECK (priority BETWEEN 1 AND 5)
 );
 
-CREATE INDEX IF NOT EXISTS idx_mission_status_priority
-    ON mission(status, priority);
+CREATE TABLE  FAULT_LOG (
+    fault_id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    uav_id          INTEGER      NOT NULL,
+    fault_type      VARCHAR(30)  NOT NULL,   -- LOW_BATTERY | COMM_LOSS | MOTOR_FAILURE |
+                                              -- GPS_ERROR | SENSOR_FAULT | CRASH | OTHER
+    description     TEXT,
+    timestamp       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (uav_id) REFERENCES UAV(uav_id)
+);
+
+CREATE INDEX  idx_faultlog_uav_time ON FAULT_LOG(uav_id, timestamp DESC);
