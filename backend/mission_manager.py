@@ -1,144 +1,121 @@
+"""
+FleetOS Mission Manager.
+Manages mission creation, state transitions, validation, and database operations.
+"""
 
-import mysql.connector
-from mysql.connector import Error
+import logging
+from typing import Any, Dict, List, Optional
+import sys
+import os
+
+# Ensure database package is importable
+DB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "database")
+if DB_DIR not in sys.path:
+    sys.path.append(DB_DIR)
+
+from db_connection import execute_query, fetch_all, fetch_one
+
+logger = logging.getLogger("fleetos.mission_manager")
 
 
-# Connect to the FLEETOS database
-def get_connection():
-    return mysql.connector.connect(
-        host="localhost",
-        user="root",
-        password="YOUR_MYSQL_PASSWORD",
-        database="fleetos"
+def create_mission(data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Creates and records a new mission in the database.
+    """
+    title = data.get("title") or f"{data.get('mission_type', 'Operational')} Mission"
+    mission_type = data.get("mission_type")
+    priority = int(data.get("priority", 3))
+    latitude = float(data.get("latitude", 28.6139))
+    longitude = float(data.get("longitude", 77.2090))
+    required_caps = data.get("required_capabilities", "CAMERA")
+    burst_time = int(data.get("burst_time", 5))
+    arrival_time = int(data.get("arrival_time", 0))
+    deadline = int(data.get("deadline", 60))
+
+    query = """
+        INSERT INTO mission (
+            title, mission_type, priority, latitude, longitude,
+            required_capabilities, burst_time, arrival_time, deadline, status
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'PENDING');
+    """
+    params = (
+        title, mission_type, priority, latitude, longitude,
+        required_caps, burst_time, arrival_time, deadline
     )
 
+    mission_id = execute_query(query, params)
 
-# Create a new mission
-def create_mission(data):
-    connection = None
-    cursor = None
-
-    try:
-        connection = get_connection()
-        cursor = connection.cursor()
-
-        query = """
-            INSERT INTO missions
-            (mission_type, priority, deadline, location,
-             required_capabilities, status)
-            VALUES (%s, %s, %s, %s, %s, %s)
+    # Log initial creation event
+    execute_query(
         """
+        INSERT INTO mission_log (mission_id, uav_id, event, status)
+        VALUES (%s, NULL, 'Mission Created', 'PENDING');
+        """,
+        (mission_id,)
+    )
 
-        values = (
-            data["mission_type"],
-            data["priority"],
-            data.get("deadline"),
-            data["location"],
-            data.get("required_capabilities", ""),
-            "Pending"
+    logger.info("FleetOS: Created mission #%s (%s)", mission_id, title)
+    return {
+        "mission_id": mission_id,
+        "title": title,
+        "mission_type": mission_type,
+        "priority": priority,
+        "burst_time": burst_time,
+        "arrival_time": arrival_time,
+        "status": "PENDING",
+        "message": "Mission registered successfully in queue"
+    }
+
+
+def get_all_missions(status_filter: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Retrieve all missions, optionally filtered by status."""
+    if status_filter:
+        query = "SELECT * FROM mission WHERE status = %s ORDER BY mission_id DESC;"
+        return fetch_all(query, (status_filter,))
+    else:
+        query = "SELECT * FROM mission ORDER BY mission_id DESC;"
+        return fetch_all(query)
+
+
+def get_pending_missions() -> List[Dict[str, Any]]:
+    """Retrieve missions awaiting scheduling and assignment."""
+    query = """
+        SELECT mission_id AS id, mission_id, title, mission_type, priority,
+               latitude, longitude, required_capabilities, burst_time, arrival_time,
+               deadline, status, created_at
+        FROM mission
+        WHERE status = 'PENDING'
+        ORDER BY priority ASC, arrival_time ASC, mission_id ASC;
+    """
+    return fetch_all(query)
+
+
+def get_mission_by_id(mission_id: int) -> Optional[Dict[str, Any]]:
+    """Retrieve a single mission by ID."""
+    query = "SELECT * FROM mission WHERE mission_id = %s;"
+    return fetch_one(query, (mission_id,))
+
+
+def update_mission_status(mission_id: int, new_status: str) -> bool:
+    """Updates the status of a mission and creates an audit entry."""
+    query = "UPDATE mission SET status = %s WHERE mission_id = %s;"
+    rows = execute_query(query, (new_status, mission_id))
+
+    if rows > 0:
+        execute_query(
+            """
+            INSERT INTO mission_log (mission_id, uav_id, event, status)
+            VALUES (%s, NULL, %s, %s);
+            """,
+            (mission_id, f"Status updated to {new_status}", new_status)
         )
-
-        cursor.execute(query, values)
-        connection.commit()
-
-        return {
-            "mission_id": cursor.lastrowid,
-            "message": "Mission created successfully"
-        }
-
-    except Error:
-        if connection and connection.is_connected():
-            connection.rollback()
-        raise
-
-    finally:
-        if cursor:
-            cursor.close()
-        if connection and connection.is_connected():
-            connection.close()
+        return True
+    return False
 
 
-# Get all missions
-def get_all_missions():
-    connection = None
-    cursor = None
-
-    try:
-        connection = get_connection()
-        cursor = connection.cursor(dictionary=True)
-
-        query = """
-            SELECT *
-            FROM missions
-            ORDER BY mission_id DESC
-        """
-
-        cursor.execute(query)
-        missions = cursor.fetchall()
-
-        return missions
-
-    finally:
-        if cursor:
-            cursor.close()
-        if connection and connection.is_connected():
-            connection.close()
-
-
-# Get a mission using its ID
-def get_mission_by_id(mission_id):
-    connection = None
-    cursor = None
-
-    try:
-        connection = get_connection()
-        cursor = connection.cursor(dictionary=True)
-
-        query = """
-            SELECT *
-            FROM missions
-            WHERE mission_id = %s
-        """
-
-        cursor.execute(query, (mission_id,))
-        mission = cursor.fetchone()
-
-        return mission
-
-    finally:
-        if cursor:
-            cursor.close()
-        if connection and connection.is_connected():
-            connection.close()
-
-
-# Update the status of a mission
-def update_mission_status(mission_id, new_status):
-    connection = None
-    cursor = None
-
-    try:
-        connection = get_connection()
-        cursor = connection.cursor()
-
-        query = """
-            UPDATE missions
-            SET status = %s
-            WHERE mission_id = %s
-        """
-
-        cursor.execute(query, (new_status, mission_id))
-        connection.commit()
-
-        return cursor.rowcount > 0
-
-    except Error:
-        if connection and connection.is_connected():
-            connection.rollback()
-        raise
-
-    finally:
-        if cursor:
-            cursor.close()
-        if connection and connection.is_connected():
-            connection.close()
+def delete_mission(mission_id: int) -> bool:
+    """Deletes a mission by ID."""
+    query = "DELETE FROM mission WHERE mission_id = %s;"
+    rows = execute_query(query, (mission_id,))
+    return rows > 0
