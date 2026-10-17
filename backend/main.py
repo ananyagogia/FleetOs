@@ -20,7 +20,8 @@ for path in [BASE_DIR, DB_DIR, SCHED_DIR]:
     if path not in sys.path:
         sys.path.append(path)
 
-from db_connection import init_database, fetch_all, fetch_one
+from db_connection import init_database, fetch_all, fetch_one, execute_query, hash_password
+import secrets
 import drone_manager
 import mission_manager
 import resource_manager
@@ -484,12 +485,123 @@ def get_resources():
         return jsonify({"error": str(exc)}), 500
 
 
+# ----------------------------------------------------------------------------
+# 9. AUTHENTICATION & USER MANAGEMENT ENDPOINTS
+# ----------------------------------------------------------------------------
+
+@app.route("/api/auth/login", methods=["POST"])
+def auth_login():
+    """Authenticates user credentials and returns session token."""
+    data = request.get_json(silent=True) or {}
+    username = (data.get("username") or "").strip().lower()
+    password = data.get("password") or ""
+
+    if not username or not password:
+        return jsonify({"error": "Username and password are required"}), 400
+
+    hashed = hash_password(password)
+    user = fetch_one(
+        "SELECT user_id, username, password_hash, full_name, email, role, status FROM users WHERE LOWER(username) = %s;",
+        (username,)
+    )
+
+    if not user or user["password_hash"] != hashed:
+        return jsonify({"error": "Invalid username or password"}), 401
+
+    if user["status"] != "ACTIVE":
+        return jsonify({"error": "Account is disabled. Contact system administrator."}), 403
+
+    token = f"flt_{secrets.token_hex(20)}"
+    return jsonify({
+        "token": token,
+        "user": {
+            "user_id": user["user_id"],
+            "username": user["username"],
+            "full_name": user["full_name"],
+            "email": user["email"],
+            "role": user["role"]
+        }
+    }), 200
+
+
+@app.route("/api/auth/me", methods=["GET"])
+def auth_me():
+    """Returns currently authenticated user profile."""
+    user = fetch_one("SELECT user_id, username, full_name, email, role, status FROM users WHERE status = 'ACTIVE' LIMIT 1;")
+    if not user:
+        return jsonify({"error": "No active user found"}), 404
+    return jsonify({"user": user}), 200
+
+
+@app.route("/api/users", methods=["GET"])
+def list_users():
+    """List all registered users (Administration module)."""
+    try:
+        users = fetch_all("SELECT user_id, username, full_name, email, role, status, created_at FROM users ORDER BY user_id ASC;")
+        return jsonify(users), 200
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/users", methods=["POST"])
+def create_user():
+    """Register a new user (Admin only)."""
+    data = request.get_json(silent=True) or {}
+    username = (data.get("username") or "").strip().lower()
+    password = data.get("password") or "fleetos123"
+    full_name = (data.get("full_name") or "").strip()
+    email = (data.get("email") or "").strip()
+    role = data.get("role", "operator")
+
+    if not username or not full_name or not email:
+        return jsonify({"error": "Username, full name, and email are required"}), 400
+
+    existing = fetch_one("SELECT user_id FROM users WHERE LOWER(username) = %s;", (username,))
+    if existing:
+        return jsonify({"error": f"Username '{username}' already exists"}), 409
+
+    hashed = hash_password(password)
+    user_id = execute_query(
+        "INSERT INTO users (username, password_hash, full_name, email, role, status) VALUES (%s, %s, %s, %s, %s, 'ACTIVE');",
+        (username, hashed, full_name, email, role)
+    )
+    return jsonify({
+        "user_id": user_id,
+        "username": username,
+        "full_name": full_name,
+        "email": email,
+        "role": role,
+        "message": "User created successfully"
+    }), 201
+
+
+@app.route("/api/users/<int:user_id>", methods=["PATCH"])
+def update_user(user_id):
+    """Update role or status of an existing user."""
+    data = request.get_json(silent=True) or {}
+    if "role" in data:
+        execute_query("UPDATE users SET role = %s WHERE user_id = %s;", (data["role"], user_id))
+    if "status" in data:
+        execute_query("UPDATE users SET status = %s WHERE user_id = %s;", (data["status"], user_id))
+    return jsonify({"message": "User updated successfully"}), 200
+
+
+@app.route("/<path:path>")
+def serve_frontend_file(path):
+    """Serves frontend static pages, scripts, styles, and assets."""
+    target_file = os.path.join(FRONTEND_DIR, path)
+    if os.path.isfile(target_file):
+        return send_from_directory(FRONTEND_DIR, path)
+    return jsonify({"error": "Resource not found"}), 404
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     print(f"================================================================")
-    print(f" FLEETOS: Autonomous Multi-UAV Fleet Operating System (Phase 2)")
+    print(f" FLEETOS: Autonomous UAV Fleet Management Platform")
     print(f" Server running at: http://localhost:{port}")
     print(f" Dashboard UI:      http://localhost:{port}/")
+    print(f" Login Portal:      http://localhost:{port}/login.html")
     print(f" API Health:        http://localhost:{port}/api/health")
     print(f"================================================================")
     app.run(host="0.0.0.0", port=port, debug=False)
