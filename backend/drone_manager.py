@@ -79,31 +79,31 @@ def create_uav(data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def update_uav_status(uav_id: int, status: str, availability: Optional[bool] = None) -> bool:
-    """Update operational status and availability of a UAV."""
-    if availability is None:
-        avail_val = 1 if status == "IDLE" else 0
-    else:
-        avail_val = 1 if availability else 0
-
-    query = "UPDATE uav SET status = %s, availability = %s WHERE uav_id = %s;"
-    rows = execute_query(query, (status, avail_val, uav_id))
-    return rows > 0
-
-
-def update_uav_battery(uav_id: int, battery_level: float) -> bool:
-    """Update UAV battery level."""
-    clamped_battery = max(0.0, min(100.0, float(battery_level)))
-    # Automatically switch to CHARGING if low battery, or IDLE if full
-    status_clause = ""
-    if clamped_battery <= 20.0:
-        query = "UPDATE uav SET battery_level = %s, status = 'CHARGING', availability = 0 WHERE uav_id = %s;"
-        rows = execute_query(query, (clamped_battery, uav_id))
-    else:
-        query = "UPDATE uav SET battery_level = %s WHERE uav_id = %s;"
-        rows = execute_query(query, (clamped_battery, uav_id))
-    return rows > 0
-
+# def update_uav_status(uav_id: int, status: str, availability: Optional[bool] = None) -> bool:
+    # """Update operational status and availability of a UAV."""
+    # if availability is None:
+        # avail_val = 1 if status == "IDLE" else 0
+    # else:
+        # avail_val = 1 if availability else 0
+# 
+    # query = "UPDATE uav SET status = %s, availability = %s WHERE uav_id = %s;"
+    # rows = execute_query(query, (status, avail_val, uav_id))
+    # return rows > 0
+# 
+# 
+# def update_uav_battery(uav_id: int, battery_level: float) -> bool:
+    # """Update UAV battery level."""
+    # clamped_battery = max(0.0, min(100.0, float(battery_level)))
+    Automatically switch to CHARGING if low battery, or IDLE if full
+    # status_clause = ""
+    # if clamped_battery <= 20.0:
+        # query = "UPDATE uav SET battery_level = %s, status = 'CHARGING', availability = 0 WHERE uav_id = %s;"
+        # rows = execute_query(query, (clamped_battery, uav_id))
+    # else:
+        # query = "UPDATE uav SET battery_level = %s WHERE uav_id = %s;"
+        # rows = execute_query(query, (clamped_battery, uav_id))
+    # return rows > 0
+# 
 
 def update_uav_location(uav_id: int, latitude: float, longitude: float) -> bool:
     """Update UAV GPS coordinates."""
