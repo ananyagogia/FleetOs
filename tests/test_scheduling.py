@@ -1,6 +1,6 @@
 """
-Unit tests for FleetOS Scheduling Algorithms.
-Tests FCFS, SJF, Priority, Round Robin, and Adaptive.
+Unit tests for FleetOS Core Scheduling Algorithms.
+Tests FCFS, SJF, Priority, and Round Robin.
 """
 
 import unittest
@@ -16,7 +16,6 @@ from fcfs import fcfs
 from sjf import sjf
 from priority import priority_scheduling
 from round_robin import round_robin
-from adaptive import adaptive_scheduling
 from metrics import calculate_metrics, get_detailed_metrics
 from comparison import compare_scheduling_algorithms
 
@@ -63,18 +62,13 @@ class TestSchedulingAlgorithms(unittest.TestCase):
         awt, atat = calculate_metrics(results)
         self.assertGreaterEqual(awt, 0)
 
-    def test_adaptive(self):
-        results = adaptive_scheduling(self.sample_missions, mode="EMERGENCY")
-        self.assertEqual(len(results), 4)
-        self.assertTrue(all("adaptive_score" in r for r in results))
-
     def test_comparison(self):
         comparison = compare_scheduling_algorithms(self.sample_missions, quantum=2)
         self.assertIn("FCFS", comparison["algorithms"])
         self.assertIn("SJF", comparison["algorithms"])
         self.assertIn("Priority", comparison["algorithms"])
         self.assertIn("Round Robin", comparison["algorithms"])
-        self.assertIn("Adaptive", comparison["algorithms"])
+        self.assertNotIn("Adaptive", comparison["algorithms"])
         self.assertIsNotNone(comparison["best_algorithm_wt"])
 
 
