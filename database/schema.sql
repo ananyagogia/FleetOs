@@ -1,3 +1,4 @@
+-- 1. UAV (Unmanned Aerial Vehicle / Drone Fleet)
 CREATE TABLE IF NOT EXISTS uav (
     uav_id              INT AUTO_INCREMENT PRIMARY KEY,
     name                VARCHAR(50) NOT NULL,
@@ -64,7 +65,7 @@ CREATE INDEX idx_assignment_status ON assignment(status);
 -- 4. MISSION_LOG (Audit Trail & Lifecycle Events)
 CREATE TABLE IF NOT EXISTS mission_log (
     log_id              INT AUTO_INCREMENT PRIMARY KEY,
-    mission_id          INT NOT NULL,
+    mission_id          INT NULL,
     uav_id              INT NULL,
     event               VARCHAR(100) NOT NULL,
     status              VARCHAR(20) NOT NULL,
@@ -76,7 +77,7 @@ CREATE TABLE IF NOT EXISTS mission_log (
 CREATE INDEX idx_log_mission ON mission_log(mission_id, timestamp);
 
 
--- 5. FLEET_RESOURCE (Charging Pads & Communication Channels)
+-- 5. FLEET_RESOURCE (Charging Pads, Communication Channels, Payloads)
 CREATE TABLE IF NOT EXISTS fleet_resource (
     resource_id         INT AUTO_INCREMENT PRIMARY KEY,
     name                VARCHAR(50) NOT NULL,
@@ -87,21 +88,63 @@ CREATE TABLE IF NOT EXISTS fleet_resource (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 
--- 6. FAULT_LOG (Failures, Emergency Warnings & Recovery Logs - Phase 3 ready)
+-- 6. RESOURCE_ALLOCATION (Dynamic Allocation & Request Tracking for Deadlock Detection)
+CREATE TABLE IF NOT EXISTS resource_allocation (
+    allocation_id       INT AUTO_INCREMENT PRIMARY KEY,
+    resource_id         INT NOT NULL,
+    uav_id              INT NOT NULL,
+    status              VARCHAR(20) NOT NULL DEFAULT 'HELD',
+                        -- HELD | WAITING | RELEASED
+    requested_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+    allocated_at        DATETIME NULL,
+    released_at         DATETIME NULL,
+    CONSTRAINT fk_ra_resource FOREIGN KEY (resource_id) REFERENCES fleet_resource(resource_id) ON DELETE CASCADE,
+    CONSTRAINT fk_ra_uav FOREIGN KEY (uav_id) REFERENCES uav(uav_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE INDEX idx_ra_resource ON resource_allocation(resource_id);
+CREATE INDEX idx_ra_uav ON resource_allocation(uav_id);
+CREATE INDEX idx_ra_status ON resource_allocation(status);
+
+
+-- 7. FAULT_LOG (Failures, Emergency Warnings & Autonomous Recovery Logs)
 CREATE TABLE IF NOT EXISTS fault_log (
     fault_id            INT AUTO_INCREMENT PRIMARY KEY,
-    uav_id              INT NOT NULL,
+    uav_id              INT NULL,
     fault_type          VARCHAR(50) NOT NULL,
-                        -- LOW_BATTERY | COMM_LOSS | MOTOR_FAILURE | GPS_ERROR | SENSOR_FAULT | CRASH | OTHER
+                        -- DRONE_FAILURE | LOW_BATTERY | MISSION_FAILURE | RESOURCE_UNAVAILABLE | COMM_LOSS | DEADLOCK_DETECTED
+    severity            VARCHAR(20) NOT NULL DEFAULT 'warning',
+                        -- critical | warning | info
+    status              VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+                        -- ACTIVE | RESOLVED | ACKNOWLEDGED
     description         TEXT,
     timestamp           DATETIME DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_fault_uav FOREIGN KEY (uav_id) REFERENCES uav(uav_id) ON DELETE CASCADE ON UPDATE CASCADE
+    resolved_at         DATETIME NULL,
+    CONSTRAINT fk_fault_uav FOREIGN KEY (uav_id) REFERENCES uav(uav_id) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE INDEX idx_fault_uav_time ON fault_log(uav_id, timestamp DESC);
+CREATE INDEX idx_fault_status ON fault_log(status);
 
 
--- 7. USERS (Authentication & Role-Based Access Control)
+-- 8. UAV_MAINTENANCE (Diagnostics, Flight Hours & Service Schedules)
+CREATE TABLE IF NOT EXISTS uav_maintenance (
+    maintenance_id      INT AUTO_INCREMENT PRIMARY KEY,
+    uav_id              INT NOT NULL,
+    flight_hours        DECIMAL(6,1) DEFAULT 0.0,
+    cycles              INT DEFAULT 0,
+    motor_health        VARCHAR(50) DEFAULT '98% (Optimal)',
+    avionics_status     VARCHAR(50) DEFAULT 'Nominal',
+    next_inspection     VARCHAR(50) DEFAULT 'In 50 flight hrs',
+    status              VARCHAR(20) DEFAULT 'GOOD',
+    last_serviced       DATETIME DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_maint_uav FOREIGN KEY (uav_id) REFERENCES uav(uav_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE INDEX idx_maint_uav ON uav_maintenance(uav_id);
+
+
+-- 9. USERS (Authentication & Role-Based Access Control)
 CREATE TABLE IF NOT EXISTS users (
     user_id             INT AUTO_INCREMENT PRIMARY KEY,
     username            VARCHAR(50) UNIQUE NOT NULL,
