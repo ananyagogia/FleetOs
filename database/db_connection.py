@@ -6,10 +6,17 @@ Supports MySQL connection with seamless automatic SQLite fallback for local deve
 import os
 import sqlite3
 import logging
+import hashlib
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("fleetos.db")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+
+
+def hash_password(password: str) -> str:
+    """Computes SHA-256 hash for user passwords."""
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
 
 # Database configuration from environment variables or defaults
 DB_HOST = os.environ.get("FLEETOS_DB_HOST", "localhost")
@@ -174,13 +181,12 @@ def fetch_one(query: str, params: Tuple = ()) -> Optional[Dict[str, Any]]:
 
 def init_database(seed_demo_data: bool = True):
     """
-    Initialize database tables and optionally seed default UAV fleet & missions.
+    Initialize database tables and optionally seed default UAV fleet, missions, resources, maintenance, and users.
     """
     mode = detect_engine()
     conn = get_connection()
 
     if mode == "mysql":
-        # MySQL table definitions
         schema_statements = [
             """
             CREATE TABLE IF NOT EXISTS uav (
@@ -228,7 +234,7 @@ def init_database(seed_demo_data: bool = True):
             """
             CREATE TABLE IF NOT EXISTS mission_log (
                 log_id INT AUTO_INCREMENT PRIMARY KEY,
-                mission_id INT NOT NULL,
+                mission_id INT NULL,
                 uav_id INT NULL,
                 event VARCHAR(100) NOT NULL,
                 status VARCHAR(20) NOT NULL,
@@ -246,13 +252,55 @@ def init_database(seed_demo_data: bool = True):
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
             """,
             """
+            CREATE TABLE IF NOT EXISTS resource_allocation (
+                allocation_id INT AUTO_INCREMENT PRIMARY KEY,
+                resource_id INT NOT NULL,
+                uav_id INT NOT NULL,
+                status VARCHAR(20) NOT NULL DEFAULT 'HELD',
+                requested_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                allocated_at DATETIME NULL,
+                released_at DATETIME NULL,
+                FOREIGN KEY (resource_id) REFERENCES fleet_resource(resource_id) ON DELETE CASCADE,
+                FOREIGN KEY (uav_id) REFERENCES uav(uav_id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+            """,
+            """
             CREATE TABLE IF NOT EXISTS fault_log (
                 fault_id INT AUTO_INCREMENT PRIMARY KEY,
-                uav_id INT NOT NULL,
+                uav_id INT NULL,
                 fault_type VARCHAR(50) NOT NULL,
+                severity VARCHAR(20) NOT NULL DEFAULT 'warning',
+                status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
                 description TEXT,
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                resolved_at DATETIME NULL,
+                FOREIGN KEY (uav_id) REFERENCES uav(uav_id) ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS uav_maintenance (
+                maintenance_id INT AUTO_INCREMENT PRIMARY KEY,
+                uav_id INT NOT NULL,
+                flight_hours DECIMAL(6,1) DEFAULT 0.0,
+                cycles INT DEFAULT 0,
+                motor_health VARCHAR(50) DEFAULT '98% (Optimal)',
+                avionics_status VARCHAR(50) DEFAULT 'Nominal',
+                next_inspection VARCHAR(50) DEFAULT 'In 50 flight hrs',
+                status VARCHAR(20) DEFAULT 'GOOD',
+                last_serviced DATETIME DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (uav_id) REFERENCES uav(uav_id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                user_id INT AUTO_INCREMENT PRIMARY KEY,
+                username VARCHAR(50) UNIQUE NOT NULL,
+                password_hash VARCHAR(128) NOT NULL,
+                full_name VARCHAR(100) NOT NULL,
+                email VARCHAR(100) NOT NULL,
+                role VARCHAR(30) NOT NULL DEFAULT 'operator',
+                status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
             """
         ]
@@ -310,7 +358,7 @@ def init_database(seed_demo_data: bool = True):
             """
             CREATE TABLE IF NOT EXISTS mission_log (
                 log_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                mission_id INTEGER NOT NULL,
+                mission_id INTEGER NULL,
                 uav_id INTEGER NULL,
                 event TEXT NOT NULL,
                 status TEXT NOT NULL,
@@ -328,19 +376,76 @@ def init_database(seed_demo_data: bool = True):
             );
             """,
             """
+            CREATE TABLE IF NOT EXISTS resource_allocation (
+                allocation_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                resource_id INTEGER NOT NULL,
+                uav_id INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'HELD',
+                requested_at TEXT DEFAULT (datetime('now')),
+                allocated_at TEXT NULL,
+                released_at TEXT NULL,
+                FOREIGN KEY (resource_id) REFERENCES fleet_resource(resource_id) ON DELETE CASCADE,
+                FOREIGN KEY (uav_id) REFERENCES uav(uav_id) ON DELETE CASCADE
+            );
+            """,
+            """
             CREATE TABLE IF NOT EXISTS fault_log (
                 fault_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                uav_id INTEGER NOT NULL,
+                uav_id INTEGER NULL,
                 fault_type TEXT NOT NULL,
+                severity TEXT NOT NULL DEFAULT 'warning',
+                status TEXT NOT NULL DEFAULT 'ACTIVE',
                 description TEXT,
                 timestamp TEXT DEFAULT (datetime('now')),
+                resolved_at TEXT NULL,
+                FOREIGN KEY (uav_id) REFERENCES uav(uav_id) ON DELETE SET NULL
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS uav_maintenance (
+                maintenance_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                uav_id INTEGER NOT NULL,
+                flight_hours REAL DEFAULT 0.0,
+                cycles INTEGER DEFAULT 0,
+                motor_health TEXT DEFAULT '98% (Optimal)',
+                avionics_status TEXT DEFAULT 'Nominal',
+                next_inspection TEXT DEFAULT 'In 50 flight hrs',
+                status TEXT DEFAULT 'GOOD',
+                last_serviced TEXT DEFAULT (datetime('now')),
                 FOREIGN KEY (uav_id) REFERENCES uav(uav_id) ON DELETE CASCADE
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                user_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                full_name TEXT NOT NULL,
+                email TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'operator',
+                status TEXT NOT NULL DEFAULT 'ACTIVE',
+                created_at TEXT DEFAULT (datetime('now'))
             );
             """
         ]
         cursor = conn.cursor()
         for statement in schema_statements:
             cursor.execute(statement)
+
+        # Migration helper: ensure new columns exist in fault_log
+        try:
+            cursor.execute("ALTER TABLE fault_log ADD COLUMN severity TEXT NOT NULL DEFAULT 'warning';")
+        except Exception:
+            pass
+        try:
+            cursor.execute("ALTER TABLE fault_log ADD COLUMN status TEXT NOT NULL DEFAULT 'ACTIVE';")
+        except Exception:
+            pass
+        try:
+            cursor.execute("ALTER TABLE fault_log ADD COLUMN resolved_at TEXT NULL;")
+        except Exception:
+            pass
+
         conn.commit()
         cursor.close()
 
@@ -352,7 +457,7 @@ def init_database(seed_demo_data: bool = True):
 
 
 def seed_fleet_and_missions():
-    """Seed initial realistic UAV fleet and demo missions if not present."""
+    """Seed initial realistic UAV fleet, missions, resources, maintenance and accounts if not present."""
     existing_uavs = fetch_all("SELECT COUNT(*) as cnt FROM uav;")
     count = existing_uavs[0]["cnt"] if existing_uavs else 0
     if count == 0:
@@ -403,6 +508,7 @@ def seed_fleet_and_missions():
             ("Fast-Charge Pad Alpha", "CHARGING_PAD", 4, 3),
             ("Fast-Charge Pad Beta", "CHARGING_PAD", 4, 4),
             ("Telemetry Comm Band High", "COMM_CHANNEL", 8, 7),
+            ("Thermal Imaging Pod Alpha", "SENSOR_PAYLOAD", 2, 2),
         ]
         for r in resources:
             execute_query(
@@ -411,4 +517,83 @@ def seed_fleet_and_missions():
                 VALUES (%s, %s, %s, %s)
                 """,
                 r
+            )
+
+    existing_maint = fetch_all("SELECT COUNT(*) as cnt FROM uav_maintenance;")
+    maint_count = existing_maint[0]["cnt"] if existing_maint else 0
+    if maint_count == 0:
+        logger.info("FleetOS DB: Seeding UAV maintenance records...")
+        all_drones = fetch_all("SELECT uav_id, name FROM uav ORDER BY uav_id ASC;")
+        sample_maint = [
+            (148.4, 52, "98% (Optimal)", "Nominal", "In 32 flight hrs", "GOOD"),
+            (215.1, 74, "92% (Good)", "Nominal", "In 14 flight hrs", "GOOD"),
+            (86.0, 31, "99% (Optimal)", "Nominal", "In 64 flight hrs", "GOOD"),
+            (120.5, 42, "95% (Good)", "Nominal", "In 48 flight hrs", "GOOD"),
+            (310.2, 110, "88% (Service Scheduled)", "Minor Vibration", "Scheduled: Tomorrow", "WARNING"),
+            (45.0, 15, "100% (New)", "Nominal", "In 95 flight hrs", "GOOD"),
+            (178.0, 60, "94% (Good)", "Nominal", "In 22 flight hrs", "GOOD"),
+            (95.5, 33, "97% (Optimal)", "Nominal", "In 55 flight hrs", "GOOD"),
+        ]
+        for idx, drone in enumerate(all_drones):
+            m = sample_maint[idx % len(sample_maint)]
+            execute_query(
+                """
+                INSERT INTO uav_maintenance (uav_id, flight_hours, cycles, motor_health, avionics_status, next_inspection, status)
+                VALUES (%s, %s, %s, %s, %s, %s, %s);
+                """,
+                (drone["uav_id"], m[0], m[1], m[2], m[3], m[4], m[5])
+            )
+
+    existing_faults = fetch_all("SELECT COUNT(*) as cnt FROM fault_log;")
+    f_count = existing_faults[0]["cnt"] if existing_faults else 0
+    if f_count == 0:
+        logger.info("FleetOS DB: Seeding initial operational alerts and incident logs...")
+        all_drones = fetch_all("SELECT uav_id, name FROM uav ORDER BY uav_id ASC;")
+        u_dict = {d["name"]: d["uav_id"] for d in all_drones}
+
+        sample_faults = [
+            (u_dict.get("Sanjivani-02"), "LOW_BATTERY", "critical", "ACTIVE", "Battery level dropped below 25.0%. Autonomous docking to Fast-Charge Pad Alpha initiated."),
+            (None, "RESOURCE_UNAVAILABLE", "warning", "ACTIVE", "High wind shear advisory active in Sector 4. Payload airspeed limit enforced."),
+            (u_dict.get("Pawan-01"), "COMM_LOSS", "info", "RESOLVED", "RF telemetry band signal-to-noise ratio restored to 99.4% via adaptive frequency jump."),
+            (u_dict.get("Garuda-01"), "SENSOR_FAULT", "warning", "RESOLVED", "Thermal sensor drift detected during high-noon patrol. Auto-calibration offset applied.")
+        ]
+        for f in sample_faults:
+            execute_query(
+                """
+                INSERT INTO fault_log (uav_id, fault_type, severity, status, description)
+                VALUES (%s, %s, %s, %s, %s);
+                """,
+                f
+            )
+
+    existing_alloc = fetch_all("SELECT COUNT(*) as cnt FROM resource_allocation;")
+    alloc_count = existing_alloc[0]["cnt"] if existing_alloc else 0
+    if alloc_count == 0:
+        pad = fetch_one("SELECT resource_id FROM fleet_resource WHERE resource_type = 'CHARGING_PAD' LIMIT 1;")
+        docked_uav = fetch_one("SELECT uav_id FROM uav WHERE status = 'CHARGING' LIMIT 1;")
+        if pad and docked_uav:
+            execute_query(
+                """
+                INSERT INTO resource_allocation (resource_id, uav_id, status, allocated_at)
+                VALUES (%s, %s, 'HELD', datetime('now'));
+                """,
+                (pad["resource_id"], docked_uav["uav_id"])
+            )
+
+    existing_users = fetch_all("SELECT COUNT(*) as cnt FROM users;")
+    u_count = existing_users[0]["cnt"] if existing_users else 0
+    if u_count == 0:
+        logger.info("FleetOS DB: Seeding default user accounts...")
+        demo_users = [
+            ("admin", hash_password("admin123"), "Commander Alex Vance", "admin@fleetos.internal", "admin"),
+            ("operator", hash_password("operator123"), "Elena Rostova", "ops@fleetos.internal", "operator"),
+            ("viewer", hash_password("viewer123"), "Dr. Marcus Chen", "viewer@fleetos.internal", "viewer")
+        ]
+        for user in demo_users:
+            execute_query(
+                """
+                INSERT INTO users (username, password_hash, full_name, email, role)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                user
             )
