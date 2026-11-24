@@ -1,6 +1,6 @@
 """
 FleetOS Scheduling Comparison Engine.
-Runs FCFS, SJF, Priority, Round Robin, and Adaptive algorithms
+Runs FCFS, SJF, Priority, and Round Robin algorithms
 against identical workloads and calculates comparative metrics.
 """
 
@@ -15,17 +15,16 @@ from fcfs import fcfs
 from sjf import sjf
 from priority import priority_scheduling
 from round_robin import round_robin
-from adaptive import adaptive_scheduling
 from metrics import get_detailed_metrics
 
 
 def compare_scheduling_algorithms(
     missions: List[Dict[str, Any]],
-    quantum: int = 2,
-    adaptive_mode: str = "NORMAL"
+    quantum: int = 2
 ) -> Dict[str, Any]:
     """
-    Executes all scheduling algorithms and produces a side-by-side comparison.
+    Executes core scheduling algorithms (FCFS, SJF, Priority, Round Robin)
+    and produces a side-by-side comparison.
     """
     if not missions:
         return {
@@ -51,10 +50,6 @@ def compare_scheduling_algorithms(
     rr_res, rr_slices = round_robin(missions, quantum=quantum)
     rr_metrics = get_detailed_metrics(rr_res)
 
-    # 5. Run Adaptive
-    adapt_res = adaptive_scheduling(missions, mode=adaptive_mode)
-    adapt_metrics = get_detailed_metrics(adapt_res)
-
     algorithms_data = {
         "FCFS": {
             "schedule": fcfs_res,
@@ -76,11 +71,6 @@ def compare_scheduling_algorithms(
             "gantt_slices": rr_slices,
             "metrics": rr_metrics,
             "type": f"Preemptive Round Robin (q={quantum})"
-        },
-        "Adaptive": {
-            "schedule": adapt_res,
-            "metrics": adapt_metrics,
-            "type": f"FleetOS Multi-factor Adaptive ({adaptive_mode})"
         }
     }
 
