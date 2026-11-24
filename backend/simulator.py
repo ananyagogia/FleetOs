@@ -1,7 +1,7 @@
 """
 FleetOS Simulation Engine.
 Drives dynamic time progression, UAV flight movement, battery drain,
-charging cycles, and mission completion events.
+charging cycles, mission completion events, and telemetry updates.
 """
 
 import logging
@@ -10,10 +10,14 @@ import sys
 import os
 
 DB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "database")
-if DB_DIR not in sys.path:
-    sys.path.append(DB_DIR)
+RES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "resources")
+for p in [DB_DIR, RES_DIR]:
+    if p not in sys.path:
+        sys.path.append(p)
 
 from db_connection import execute_query, fetch_all, fetch_one
+from deadlock_detector import deadlock_mgr
+import fault_manager
 
 logger = logging.getLogger("fleetos.simulator")
 
@@ -26,12 +30,19 @@ def get_current_tick() -> int:
     return _SIMULATION_TICK
 
 
+def reset_simulation():
+    """Resets simulated clock tick to zero."""
+    global _SIMULATION_TICK
+    _SIMULATION_TICK = 0
+
+
 def step_simulation() -> Dict[str, Any]:
     """
     Advances the FleetOS simulation by one discrete time tick.
-    1. Updates active assignments: drains battery, interpolates position.
-    2. Completes finished missions, frees UAVs.
-    3. Recharges UAVs that are currently in CHARGING status.
+    1. Updates active assignments: drains battery, interpolates position, logs flight hours.
+    2. Detects low battery (< 20%) and triggers autonomous docking/reassignment.
+    3. Completes finished missions, frees UAVs, and releases resources.
+    4. Recharges UAVs that are currently in CHARGING status.
     Returns list of logged simulation events.
     """
     global _SIMULATION_TICK
@@ -59,7 +70,13 @@ def step_simulation() -> Dict[str, Any]:
         # Drain battery by ~4% per tick during active flight
         new_battery = max(0.0, current_battery - 4.0)
 
-        # Move drone incrementally closer to target (25% lerp per tick)
+        # Increment flight hours in maintenance log
+        execute_query(
+            "UPDATE uav_maintenance SET flight_hours = flight_hours + 0.1 WHERE uav_id = %s;",
+            (uav_id,)
+        )
+
+        # Move drone incrementally closer to target (35% lerp per tick)
         uav_lat = float(assign["uav_lat"])
         uav_lon = float(assign["uav_lon"])
         target_lat = float(assign["m_lat"])
@@ -67,6 +84,21 @@ def step_simulation() -> Dict[str, Any]:
 
         next_lat = round(uav_lat + (target_lat - uav_lat) * 0.35, 6)
         next_lon = round(uav_lon + (target_lon - uav_lon) * 0.35, 6)
+
+        # Check for critical battery during flight
+        if new_battery <= 20.0:
+            fault_res = fault_manager.handle_low_battery(
+                uav_id,
+                description=f"Airframe {assign['uav_name']} reached critical battery reserve ({new_battery}%) during '{assign['mission_title']}'. RTB engaged."
+            )
+            events.append({
+                "type": "LOW_BATTERY_FAULT",
+                "uav_id": uav_id,
+                "uav_name": assign["uav_name"],
+                "battery": new_battery,
+                "message": fault_res["message"]
+            })
+            continue
 
         # Count ticks spent on this mission
         log_count = fetch_one(
@@ -84,9 +116,17 @@ def step_simulation() -> Dict[str, Any]:
                 (assign["assignment_id"],)
             )
             execute_query("UPDATE mission SET status = 'COMPLETED' WHERE mission_id = %s;", (mission_id,))
-            
+
+            # Release any resources allocated to this UAV
+            held = fetch_all("SELECT resource_id FROM resource_allocation WHERE uav_id = %s AND status = 'HELD';", (uav_id,))
+            for r in held:
+                deadlock_mgr.release_resource(uav_id, r["resource_id"])
+
+            # Increment cycles in maintenance table
+            execute_query("UPDATE uav_maintenance SET cycles = cycles + 1 WHERE uav_id = %s;", (uav_id,))
+
             # If battery is low, put UAV in charging, otherwise return to IDLE
-            if new_battery <= 25.0:
+            if new_battery <= 30.0:
                 execute_query(
                     "UPDATE uav SET battery_level = %s, status = 'CHARGING', availability = 0, latitude = %s, longitude = %s WHERE uav_id = %s;",
                     (new_battery, next_lat, next_lon, uav_id)
@@ -145,6 +185,19 @@ def step_simulation() -> Dict[str, Any]:
                 "UPDATE uav SET battery_level = 100.0, status = 'IDLE', availability = 1 WHERE uav_id = %s;",
                 (d_id,)
             )
+            # Release charging pad if allocated
+            pad_alloc = fetch_one(
+                """
+                SELECT ra.resource_id
+                FROM resource_allocation ra
+                JOIN fleet_resource r ON ra.resource_id = r.resource_id
+                WHERE ra.uav_id = %s AND r.resource_type = 'CHARGING_PAD' AND ra.status = 'HELD';
+                """,
+                (d_id,)
+            )
+            if pad_alloc:
+                deadlock_mgr.release_resource(d_id, pad_alloc["resource_id"])
+
             events.append({
                 "type": "UAV_CHARGED",
                 "uav_id": d_id,
