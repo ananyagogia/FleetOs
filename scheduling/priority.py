@@ -6,7 +6,7 @@ Selects the arrived mission with highest priority (lower numerical value = highe
 from typing import Any, Dict, List
 
 
-def priority_scheduling(missions: List[Dict[str, Any]], lower_is_higher: bool = True) -> List[Dict[str, Any]]:
+def priority_scheduling(missions: List[Dict[str, Any]], lower_is_higher: bool = True, aging_interval: int = 0) -> List[Dict[str, Any]]:
     """
     Executes Priority scheduling on a list of missions.
     Each mission is expected to have:
@@ -34,10 +34,17 @@ def priority_scheduling(missions: List[Dict[str, Any]], lower_is_higher: bool = 
 
         # Select mission with highest priority
         if lower_is_higher:
+            def effective_priority(m):
+                p = m.get("priority", 3)
+                if aging_interval > 0:
+                    waited = current_time - m.get("arrival_time", 0)
+                    p = max(1, p - waited // aging_interval)
+                return p
+
             selected = min(
                 available_missions,
                 key=lambda m: (
-                    m.get("priority", 3),
+                    effective_priority(m),
                     m.get("arrival_time", 0),
                     str(m.get("id", m.get("mission_id", 0)))
                 )
